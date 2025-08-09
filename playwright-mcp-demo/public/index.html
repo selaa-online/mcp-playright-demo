@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🛡️ Live OWASP Security Dashboard</title>
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .header h1 {
+            color: #2c3e50;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .scan-controls {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .url-input {
+            flex: 1;
+            padding: 12px 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            min-width: 300px;
+        }
+        
+        .url-input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        
+        .scan-button {
+            background: linear-gradient(45deg, #27ae60, #2ecc71);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .scan-button:hover {
+            background: linear-gradient(45deg, #229954, #27ae60);
+            transform: translateY(-2px);
+        }
+        
+        .scan-button:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .scan-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: bold;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #95a5a6;
+        }
+        
+        .status-indicator.running {
+            background: #f39c12;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .status-indicator.completed {
+            background: #27ae60;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 300px;
+            gap: 30px;
+        }
+        
+        .main-panel {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .summary-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .severity-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .severity-item {
+            text-align: center;
+            padding: 15px;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+        }
+        
+        .critical { background: linear-gradient(45deg, #e74c3c, #c0392b); }
+        .high { background: linear-gradient(45deg, #e67e22, #d35400); }
+        .medium { background: linear-gradient(45deg, #f39c12, #e67e22); }
+        .low { background: linear-gradient(45deg, #27ae60, #229954); }
+        
+        .severity-count {
+            font-size: 1.8em;
+            display: block;
+            margin-bottom: 5px;
+        }
+        
+        .test-list {
+            list-style: none;
+        }
+        
+        .test-item {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid #e9ecef;
+            transition: all 0.3s ease;
+        }
+        
+        .test-item.pending {
+            border-left-color: #95a5a6;
+        }
+        
+        .test-item.running {
+            border-left-color: #f39c12;
+            background: #fff8e1;
+            animation: glow 2s infinite alternate;
+        }
+        
+        .test-item.completed {
+            border-left-color: #27ae60;
+            background: #e8f5e8;
+        }
+        
+        .test-item.error {
+            border-left-color: #e74c3c;
+            background: #fdf2f2;
+        }
+        
+        @keyframes glow {
+            from { box-shadow: 0 0 5px rgba(243, 156, 18, 0.3); }
+            to { box-shadow: 0 0 20px rgba(243, 156, 18, 0.6); }
+        }
+        
+        .test-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .test-name {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .test-status {
+            font-size: 0.9em;
+            color: #7f8c8d;
+            text-transform: uppercase;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #e9ecef;
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(45deg, #3498db, #2980b9);
+            border-radius: 3px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+        
+        .test-details {
+            font-size: 0.9em;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+        
+        .vulnerability-counter {
+            background: #e74c3c;
+            color: white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        
+        .vulnerability-list {
+            margin-top: 10px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        
+        .vulnerability-item {
+            background: rgba(231, 76, 60, 0.1);
+            border: 1px solid rgba(231, 76, 60, 0.3);
+            border-radius: 5px;
+            padding: 8px;
+            margin-bottom: 5px;
+            font-size: 0.85em;
+        }
+        
+        .vulnerability-severity {
+            font-weight: bold;
+            color: #e74c3c;
+        }
+        
+        .chart-container {
+            margin-top: 20px;
+            height: 200px;
+        }
+        
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 15px;
+            border-radius: 25px;
+            color: white;
+            font-weight: bold;
+            font-size: 0.9em;
+            z-index: 1000;
+        }
+        
+        .connection-status.connected {
+            background: #27ae60;
+        }
+        
+        .connection-status.disconnected {
+            background: #e74c3c;
+        }
+        
+        .scan-log {
+            background: #2c3e50;
+            color: #ecf0f1;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 2px 0;
+        }
+        
+        .log-timestamp {
+            color: #95a5a6;
+            margin-right: 10px;
+        }
+        
+        .log-info { color: #3498db; }
+        .log-success { color: #27ae60; }
+        .log-warning { color: #f39c12; }
+        .log-error { color: #e74c3c; }
+        
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .scan-controls {
+                flex-direction: column;
+            }
+            
+            .url-input {
+                width: 100%;
+                min-width: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-status" id="connectionStatus">
+        🔴 Disconnected
+    </div>
+    
+    <div class="container">
+        <div class="header">
+            <h1>🛡️ Live OWASP Security Dashboard</h1>
+            <p>Real-time security testing with live updates</p>
+            
+            <div class="scan-controls">
+                <input type="url" id="targetUrl" class="url-input" placeholder="Enter target URL (e.g., https://thyaga.lk/)" value="https://thyaga.lk/">
+                <button id="startScan" class="scan-button">🚀 Start Security Scan</button>
+                <div class="scan-status">
+                    <div class="status-indicator" id="statusIndicator"></div>
+                    <span id="statusText">Ready to scan</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="dashboard-grid">
+            <div class="main-panel">
+                <h2>📋 Test Progress</h2>
+                <ul class="test-list" id="testList">
+                    <!-- Test items will be populated by JavaScript -->
+                </ul>
+                
+                <div class="scan-log" id="scanLog">
+                    <div class="log-entry">
+                        <span class="log-timestamp">Ready</span>
+                        <span class="log-info">Dashboard initialized. Enter a URL and click 'Start Security Scan' to begin.</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="sidebar">
+                <div class="summary-card">
+                    <h3>📊 Vulnerability Summary</h3>
+                    <div class="severity-grid">
+                        <div class="severity-item critical">
+                            <span class="severity-count" id="criticalCount">0</span>
+                            Critical
+                        </div>
+                        <div class="severity-item high">
+                            <span class="severity-count" id="highCount">0</span>
+                            High
+                        </div>
+                        <div class="severity-item medium">
+                            <span class="severity-count" id="mediumCount">0</span>
+                            Medium
+                        </div>
+                        <div class="severity-item low">
+                            <span class="severity-count" id="lowCount">0</span>
+                            Low
+                        </div>
+                    </div>
+                    
+                    <div class="chart-container">
+                        <canvas id="summaryChart"></canvas>
+                    </div>
+                </div>
+                
+                <div class="summary-card">
+                    <h3>⏱️ Scan Information</h3>
+                    <div id="scanInfo">
+                        <p><strong>Target:</strong> <span id="scanTarget">Not set</span></p>
+                        <p><strong>Started:</strong> <span id="scanStartTime">-</span></p>
+                        <p><strong>Duration:</strong> <span id="scanDuration">-</span></p>
+                        <p><strong>Tests:</strong> <span id="completedTests">0</span>/10</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Socket.IO connection
+        const socket = io();
+        let scanStartTime = null;
+        let scanTimer = null;
+        let summaryChart = null;
+        
+        // DOM elements
+        const connectionStatus = document.getElementById('connectionStatus');
+        const targetUrl = document.getElementById('targetUrl');
+        const startScanBtn = document.getElementById('startScan');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        const testList = document.getElementById('testList');
+        const scanLog = document.getElementById('scanLog');
+        const scanTarget = document.getElementById('scanTarget');
+        const scanStartTimeEl = document.getElementById('scanStartTime');
+        const scanDurationEl = document.getElementById('scanDuration');
+        const completedTestsEl = document.getElementById('completedTests');
+        
+        // Severity counters
+        const criticalCount = document.getElementById('criticalCount');
+        const highCount = document.getElementById('highCount');
+        const mediumCount = document.getElementById('mediumCount');
+        const lowCount = document.getElementById('lowCount');
+        
+        let testSuite = [];
+        
+        // Initialize summary chart
+        function initSummaryChart() {
+            const ctx = document.getElementById('summaryChart').getContext('2d');
+            summaryChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Critical', 'High', 'Medium', 'Low'],
+                    datasets: [{
+                        data: [0, 0, 0, 0],
+                        backgroundColor: ['#e74c3c', '#e67e22', '#f39c12', '#27ae60'],
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Connection event handlers
+        socket.on('connect', () => {
+            connectionStatus.textContent = '🟢 Connected';
+            connectionStatus.className = 'connection-status connected';
+            addLogEntry('Connected to security testing server', 'success');
+        });
+        
+        socket.on('disconnect', () => {
+            connectionStatus.textContent = '🔴 Disconnected';
+            connectionStatus.className = 'connection-status disconnected';
+            addLogEntry('Disconnected from server', 'error');
+        });
+        
+        // Test suite update handler
+        socket.on('testSuiteUpdate', (tests) => {
+            testSuite = tests;
+            renderTestList();
+        });
+        
+        // Individual test update handler
+        socket.on('testUpdate', (updatedTest) => {
+            const testIndex = testSuite.findIndex(test => test.testName === updatedTest.testName);
+            if (testIndex !== -1) {
+                testSuite[testIndex] = updatedTest;
+                renderTestList();
+                updateSummary();
+                
+                if (updatedTest.status === 'running') {
+                    addLogEntry(`Running ${updatedTest.testName}... ${updatedTest.details || ''}`, 'info');
+                } else if (updatedTest.status === 'completed') {
+                    addLogEntry(`✅ ${updatedTest.testName} completed - ${updatedTest.vulnerabilities.length} issues found`, 'success');
+                }
+            }
+        });
+        
+        // Vulnerability found handler
+        socket.on('vulnerabilityFound', (data) => {
+            const { testIndex, vulnerability } = data;
+            addLogEntry(`🚨 ${vulnerability.severity}: ${vulnerability.title}`, 'warning');
+        });
+        
+        // Scan lifecycle handlers
+        socket.on('scanStarted', (data) => {
+            scanStartTime = new Date(data.timestamp);
+            scanTarget.textContent = data.targetUrl;
+            scanStartTimeEl.textContent = scanStartTime.toLocaleTimeString();
+            
+            statusIndicator.className = 'status-indicator running';
+            statusText.textContent = 'Scanning in progress...';
+            startScanBtn.disabled = true;
+            
+            // Start duration timer
+            scanTimer = setInterval(updateScanDuration, 1000);
+            
+            addLogEntry(`🚀 Security scan started for ${data.targetUrl}`, 'info');
+        });
+        
+        socket.on('scanCompleted', (data) => {
+            clearInterval(scanTimer);
+            
+            statusIndicator.className = 'status-indicator completed';
+            statusText.textContent = 'Scan completed';
+            startScanBtn.disabled = false;
+            
+            addLogEntry(`✅ Scan completed! Found ${data.totalVulnerabilities} total vulnerabilities`, 'success');
+            addLogEntry(`📊 Breakdown: ${data.severityBreakdown.critical} Critical, ${data.severityBreakdown.high} High, ${data.severityBreakdown.medium} Medium, ${data.severityBreakdown.low} Low`, 'info');
+        });
+        
+        socket.on('scanError', (data) => {
+            clearInterval(scanTimer);
+            
+            statusIndicator.className = 'status-indicator';
+            statusText.textContent = 'Scan error';
+            startScanBtn.disabled = false;
+            
+            addLogEntry(`❌ Scan error: ${data.error}`, 'error');
+        });
+        
+        // Start scan button handler
+        startScanBtn.addEventListener('click', () => {
+            const url = targetUrl.value.trim();
+            if (!url) {
+                alert('Please enter a target URL');
+                return;
+            }
+            
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                alert('Please enter a valid URL starting with http:// or https://');
+                return;
+            }
+            
+            socket.emit('startScan', url);
+        });
+        
+        // Render test list
+        function renderTestList() {
+            testList.innerHTML = '';
+            
+            testSuite.forEach((test, index) => {
+                const li = document.createElement('li');
+                li.className = `test-item ${test.status}`;
+                
+                const vulnerabilityCount = test.vulnerabilities.length;
+                
+                li.innerHTML = `
+                    <div class="test-header">
+                        <div class="test-name">${test.testName}</div>
+                        <div class="test-status">${test.status}</div>
+                        ${vulnerabilityCount > 0 ? `<div class="vulnerability-counter">${vulnerabilityCount}</div>` : ''}
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${test.progress}%"></div>
+                    </div>
+                    ${test.details ? `<div class="test-details">${test.details}</div>` : ''}
+                    ${vulnerabilityCount > 0 ? `
+                        <div class="vulnerability-list">
+                            ${test.vulnerabilities.map(vuln => `
+                                <div class="vulnerability-item">
+                                    <span class="vulnerability-severity">${vuln.severity}:</span> ${vuln.title}
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+                `;
+                
+                testList.appendChild(li);
+            });
+        }
+        
+        // Update summary counters and chart
+        function updateSummary() {
+            let critical = 0, high = 0, medium = 0, low = 0, completed = 0;
+            
+            testSuite.forEach(test => {
+                if (test.status === 'completed') completed++;
+                
+                test.vulnerabilities.forEach(vuln => {
+                    switch (vuln.severity) {
+                        case 'CRITICAL': critical++; break;
+                        case 'HIGH': high++; break;
+                        case 'MEDIUM': medium++; break;
+                        case 'LOW': low++; break;
+                    }
+                });
+            });
+            
+            criticalCount.textContent = critical;
+            highCount.textContent = high;
+            mediumCount.textContent = medium;
+            lowCount.textContent = low;
+            completedTestsEl.textContent = completed;
+            
+            if (summaryChart) {
+                summaryChart.data.datasets[0].data = [critical, high, medium, low];
+                summaryChart.update();
+            }
+        }
+        
+        // Update scan duration
+        function updateScanDuration() {
+            if (scanStartTime) {
+                const now = new Date();
+                const duration = Math.floor((now - scanStartTime) / 1000);
+                const minutes = Math.floor(duration / 60);
+                const seconds = duration % 60;
+                scanDurationEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+        }
+        
+        // Add log entry
+        function addLogEntry(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            logEntry.innerHTML = `
+                <span class="log-timestamp">[${timestamp}]</span>
+                <span class="log-${type}">${message}</span>
+            `;
+            
+            scanLog.appendChild(logEntry);
+            scanLog.scrollTop = scanLog.scrollHeight;
+            
+            // Keep only last 50 entries
+            while (scanLog.children.length > 50) {
+                scanLog.removeChild(scanLog.firstChild);
+            }
+        }
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            initSummaryChart();
+        });
+    </script>
+</body>
+</html>
